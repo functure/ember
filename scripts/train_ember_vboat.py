@@ -21,9 +21,17 @@ def main():
         print("Creating vectorized features")
         ember.create_vectorized_features(args.datadir)
 
+    X_train_path = os.path.join(args.datadir, "X_train_vboat.dat")
+    y_train_path = os.path.join(args.datadir, "y_train_vboat.dat")
+    if not (os.path.exists(X_train_path) and os.path.exists(y_train_path)):
+        print("Creating vectorized features for vboat")
+
+        print(ember.__file__)
+        ember.create_vectorized_features_vboat(args.datadir)
     print("Training LightGBM model")
-    lgbm_model = ember.train_model(args.datadir)
-    lgbm_model.save_model(os.path.join(args.datadir, "model2.txt"))
+
+    lgbm_model = ember.train_model_vboat(args.datadir, 50)
+    lgbm_model.save_model(os.path.join(args.datadir, "model_vboat.txt"))
 
 
 if __name__ == "__main__":

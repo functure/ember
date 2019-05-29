@@ -59,7 +59,6 @@ def vectorize_subset(X_path, y_path, raw_feature_paths, nrows):
     for _ in tqdm.tqdm(pool.imap_unordered(vectorize_unpack, argument_iterator), total=nrows):
         pass
 
-
 def create_vectorized_features(data_dir):
     """
     Create feature vectors from raw features and write them to disk
@@ -76,12 +75,21 @@ def create_vectorized_features(data_dir):
     raw_feature_paths = [os.path.join(data_dir, "test_features.jsonl")]
     vectorize_subset(X_path, y_path, raw_feature_paths, 200000)
 
+def create_vectorized_features_vboat(data_dir, nvboat=17157):
+    """
+    Create feature vectors from raw features and write them to disk
+    """
+    print("Vectorizing training set")
+    X_path = os.path.join(data_dir, "X_train_vboat.dat")
+    y_path = os.path.join(data_dir, "y_train_vboat.dat")
+    raw_feature_paths = [os.path.join(data_dir, "VBoat.jsonl")]
+    vectorize_subset(X_path, y_path, raw_feature_paths, nvboat)
 
 def read_vectorized_features(data_dir, subset=None):
     """
     Read vectorized features into memory mapped numpy arrays
     """
-    if subset is not None and subset not in ["train", "test"]:
+    if subset is not None and subset not in ["train", "test", "vboat"]:
         return None
 
     ndim = PEFeatureExtractor.dim
@@ -105,6 +113,13 @@ def read_vectorized_features(data_dir, subset=None):
         y_test = np.memmap(y_test_path, dtype=np.float32, mode="r", shape=200000)
         if subset == "test":
             return X_test, y_test
+
+    if subset == "vboat":
+        X_train_path = os.path.join(data_dir, "X_train_vboat.dat")
+        y_train_path = os.path.join(data_dir, "y_train_vboat.dat")
+        X_train = np.memmap(X_train_path, dtype=np.float32, mode="r", shape=(17157, ndim))
+        y_train = np.memmap(y_train_path, dtype=np.float32, mode="r", shape=17157)
+        return X_train, y_train
 
     return X_train, y_train, X_test, y_test
 
@@ -159,6 +174,47 @@ def train_model(data_dir):
 
     return lgbm_model
 
+def train_model_vboat(data_dir, N_vboat=1):
+    """
+    Train the LightGBM model from the EMBER dataset from the vectorized features
+    """
+    # Read data
+    X_train, y_train = read_vectorized_features(data_dir, subset="train")
+
+    X_vboat, y_vboat = read_vectorized_features(data_dir, subset="vboat")
+
+    print(X_vboat.shape, y_vboat.shape)
+    X_vboat = np.tile(X_vboat, (N_vboat,1))
+    y_vboat = np.tile(y_vboat, N_vboat)
+    print(X_vboat.shape, y_vboat.shape)
+
+    X_train = np.concatenate([X_train, X_vboat])
+    y_train = np.concatenate([y_train, y_vboat])
+    # Filter unlabeled data
+    train_rows = (y_train != -1)
+
+    # Train
+    lgbm_dataset = lgb.Dataset(X_train[train_rows], y_train[train_rows])
+    lgbm_model = lgb.train({"application": "binary"}, lgbm_dataset)
+
+    return lgbm_model
+
+def test_model(lgbm_model, data_dir):
+    """
+    Test the LightGBM model from the EMBER dataset from the vectorized features
+    """
+    # Read data
+    X_test, y_test = read_vectorized_features(data_dir, subset="test")
+
+    # Filter unlabeled data
+    test_rows = (y_test != -1)
+
+    test_features = X_test[test_rows]
+    test_labels = y_test[test_rows]
+
+    test_predictions = lgb.predict(test_features)
+
+    return test_predictions
 
 def predict_sample(lgbm_model, file_data):
     """
